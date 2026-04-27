@@ -1,1 +1,0 @@
-(sleep 3; shortcuts run "PausePlayer"; pmset displaysleepnow) &

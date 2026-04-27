@@ -13,6 +13,9 @@
 - Custom timer now validates each time segment and computes total seconds automatically.
 - Timer start now closes the Raycast window so reopening Raycast returns to the default UI.
 - Command metadata updated to reflect the merged, single-command workflow.
+- README now documents required `PausePlayer` Shortcut setup with a visual example.
+- README cleaned up to remove old shell-script instructions and document the Raycast-only flow.
+- Extension platforms narrowed to `macOS` to match runtime behavior (`shortcuts` + `pmset`).
 
 ### Removed
 
