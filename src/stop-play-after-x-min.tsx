@@ -1,34 +1,39 @@
-import { Action, ActionPanel, Form, Icon, List, Toast, closeMainWindow, confirmAlert, showToast } from "@raycast/api";
+import {
+  Action,
+  ActionPanel,
+  Form,
+  Icon,
+  List,
+  LocalStorage,
+  Toast,
+  closeMainWindow,
+  confirmAlert,
+  showToast,
+  useNavigation,
+} from "@raycast/api";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { useCallback, useEffect, useState } from "react";
 
-type Values = {
-  hours: string;
-  minutes: string;
-  seconds: string;
-};
+type FormValues = { hours: string; minutes: string; seconds: string };
 
-type TimerProcess = {
-  pid: string;
-  command: string;
-};
+type RunningTimer = { pid: string; command: string };
 
 const execFileAsync = promisify(execFile);
 
-function buildShellCommand(seconds: number): string {
-  return `STOP_PLAY_TIMER=1; sleep ${seconds}; shortcuts run "PausePlayer"; pmset displaysleepnow`;
+const RECENTS_KEY = "stop-play:recents";
+const MAX_RECENTS = 5;
+const MARKER = "STOP_PLAY_TIMER=1";
+
+function timerShell(seconds: number): string {
+  return `${MARKER};sudo pmset -a disablesleep 1; pmset displaysleepnow; sleep ${seconds}; shortcuts run "PausePlayer";sudo pmset -a disablesleep 0;`;
 }
 
-async function startTimer(seconds: number) {
-  const command = buildShellCommand(seconds);
-  const child = spawn("zsh", ["-lc", command], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+function startDetached(seconds: number): void {
+  spawn("zsh", ["-lc", timerShell(seconds)], { detached: true, stdio: "ignore" }).unref();
+}
 
-  await closeMainWindow();
+async function successToast(seconds: number): Promise<void> {
   await showToast({
     style: Toast.Style.Success,
     title: `Timer started for ${seconds} sec`,
@@ -36,142 +41,193 @@ async function startTimer(seconds: number) {
   });
 }
 
-async function getTimerProcesses(): Promise<TimerProcess[]> {
-  const { stdout } = await execFileAsync("ps", ["-axo", "pid=,command="]);
-
-  return stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.includes("STOP_PLAY_TIMER=1; sleep"))
-    .map((line) => {
-      const firstSpace = line.indexOf(" ");
-      return {
-        pid: line.slice(0, firstSpace),
-        command: line.slice(firstSpace + 1),
-      };
-    });
+async function loadRecents(): Promise<number[]> {
+  const raw = await LocalStorage.getItem(RECENTS_KEY);
+  if (typeof raw !== "string" || !raw) return [];
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (!Array.isArray(v)) return [];
+    return v
+      .map((x) => Number(x))
+      .filter((n) => Number.isInteger(n) && n > 0)
+      .slice(0, MAX_RECENTS);
+  } catch {
+    return [];
+  }
 }
 
-function CustomTimerForm() {
-  async function handleSubmit(values: Values) {
-    const hours = Number.parseInt(values.hours || "0", 10);
-    const minutes = Number.parseInt(values.minutes || "0", 10);
-    const seconds = Number.parseInt(values.seconds || "0", 10);
+async function saveRecents(next: number[]): Promise<void> {
+  await LocalStorage.setItem(RECENTS_KEY, JSON.stringify(next.slice(0, MAX_RECENTS)));
+}
 
-    const hasInvalidPart = [hours, minutes, seconds].some((value) => !Number.isInteger(value) || value < 0);
-    if (hasInvalidPart) {
-      await showToast({ style: Toast.Style.Failure, title: "Enter valid time values" });
-      return;
-    }
+async function bumpRecent(seconds: number): Promise<number[]> {
+  const cur = await loadRecents();
+  const next = [seconds, ...cur.filter((s) => s !== seconds)].slice(0, MAX_RECENTS);
+  await saveRecents(next);
+  return next;
+}
 
-    const totalSeconds = hours * 60 * 60 + minutes * 60 + seconds;
-    if (totalSeconds <= 0) {
-      await showToast({ style: Toast.Style.Failure, title: "Set at least 1 second" });
-      return;
-    }
-
-    await startTimer(totalSeconds);
+async function runningTimers(): Promise<RunningTimer[]> {
+  const { stdout } = await execFileAsync("ps", ["-axww", "-o", "pid=,command="]);
+  const out: RunningTimer[] = [];
+  for (const line of stdout.split("\n")) {
+    const row = line.trim();
+    if (!row.includes(MARKER)) continue;
+    const m = row.match(/^(\d+)\s+(.+)$/);
+    if (m) out.push({ pid: m[1], command: m[2] });
   }
+  return out;
+}
 
+function suggestionTitle(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (!h && !m) return sec === 1 ? "Start 1 sec" : `Start ${sec} sec`;
+  if (!h && !s) return m === 1 ? "Start 1 min" : `Start ${m} min`;
+  if (!m && !s) return h === 1 ? "Start 1 hr" : `Start ${h} hr`;
+  const p: string[] = [];
+  if (h) p.push(`${h}h`);
+  if (m) p.push(`${m}m`);
+  if (s) p.push(`${s}s`);
+  return `Start ${p.join(" ")}`;
+}
+
+function TimerForm({ onSchedule }: { onSchedule: (seconds: number) => Promise<void> }) {
   return (
     <Form
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="Start Custom" onSubmit={handleSubmit} />
+          <Action.SubmitForm
+            title="Start Custom"
+            onSubmit={async (values: FormValues) => {
+              const h = Number.parseInt(values.hours || "0", 10);
+              const mi = Number.parseInt(values.minutes || "0", 10);
+              const s = Number.parseInt(values.seconds || "0", 10);
+              if ([h, mi, s].some((x) => !Number.isInteger(x) || x < 0)) {
+                await showToast({ style: Toast.Style.Failure, title: "Enter valid time values" });
+                return;
+              }
+              const total = h * 3600 + mi * 60 + s;
+              if (total <= 0) {
+                await showToast({ style: Toast.Style.Failure, title: "Set at least 1 second" });
+                return;
+              }
+              await onSchedule(total);
+            }}
+          />
         </ActionPanel>
       }
     >
       <Form.Description text="Set duration without manual conversion." />
-      <Form.TextField id="hours" title="Hours" placeholder="0" />
-      <Form.TextField id="minutes" title="Minutes" placeholder="20" />
-      <Form.TextField id="seconds" title="Seconds" placeholder="0" />
+      <Form.TextField id="hours" title="Hours" placeholder="0" defaultValue="0" />
+      <Form.TextField id="minutes" title="Minutes" placeholder="20" defaultValue="0" />
+      <Form.TextField id="seconds" title="Seconds" placeholder="0" defaultValue="0" />
     </Form>
   );
 }
 
 export default function Command() {
-  const [items, setItems] = useState<TimerProcess[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { pop } = useNavigation();
+  const [timers, setTimers] = useState<RunningTimer[]>([]);
+  const [recents, setRecents] = useState<number[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setIsLoading(true);
+  const dismissForm = useCallback(() => {
+    pop();
+    queueMicrotask(pop);
+  }, [pop]);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
     try {
-      setItems(await getTimerProcesses());
+      const [t, r] = await Promise.all([runningTimers(), loadRecents()]);
+      setTimers(t);
+      setRecents(r);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    reload();
+  }, [reload]);
 
-  async function stopProcess(item: TimerProcess) {
-    const confirmed = await confirmAlert({
-      title: `Stop timer PID ${item.pid}?`,
-      message: item.command,
-    });
-    if (!confirmed) return;
+  const scheduleFromForm = useCallback(
+    async (seconds: number) => {
+      setRecents(await bumpRecent(seconds));
+      startDetached(seconds);
+      setTimers(await runningTimers());
+      dismissForm();
+      await successToast(seconds);
+    },
+    [dismissForm],
+  );
 
+  const scheduleFromRoot = useCallback(async (seconds: number) => {
+    setRecents(await bumpRecent(seconds));
+    startDetached(seconds);
+    await closeMainWindow();
+    await successToast(seconds);
+  }, []);
+
+  const stopTimer = async (item: RunningTimer) => {
+    if (!(await confirmAlert({ title: `Stop timer PID ${item.pid}?`, message: item.command }))) return;
     await execFileAsync("kill", [item.pid]);
     await showToast({ style: Toast.Style.Success, title: `Stopped timer ${item.pid}` });
-    await load();
-  }
-
-  const presets = [
-    { id: "20m", title: "Start 20 Min", seconds: 20 * 60 },
-
-    { id: "15m", title: "Start 15 Min", seconds: 15 * 60 },
-    { id: "10m", title: "Start 10 Min", seconds: 10 * 60 },
-  ];
+    await reload();
+  };
 
   return (
     <List
-      isLoading={isLoading}
+      isLoading={loading}
       searchBarPlaceholder="Start or manage stop-play timers"
       actions={
         <ActionPanel>
-          <Action title="Refresh Active Timers" icon={Icon.ArrowClockwise} onAction={load} />
+          <Action title="Refresh" icon={Icon.ArrowClockwise} onAction={reload} />
         </ActionPanel>
       }
     >
       <List.Section title="Start Timer">
-        {presets.map((preset) => (
-          <List.Item
-            key={preset.id}
-            title={preset.title}
-            subtitle="Quick start"
-            actions={
-              <ActionPanel>
-                <Action title={preset.title} onAction={() => startTimer(preset.seconds)} />
-              </ActionPanel>
-            }
-          />
-        ))}
+        {recents.map((sec) => {
+          const title = suggestionTitle(sec);
+          return (
+            <List.Item
+              key={sec}
+              title={title}
+              subtitle="Suggestion"
+              actions={
+                <ActionPanel>
+                  <Action title={title} onAction={() => scheduleFromRoot(sec)} />
+                </ActionPanel>
+              }
+            />
+          );
+        })}
         <List.Item
           title="Start Custom"
-          subtitle="Set hours, minutes, and seconds"
+          subtitle="Hours, minutes, seconds"
           actions={
             <ActionPanel>
-              <Action.Push title="Open Custom Timer" target={<CustomTimerForm />} />
+              <Action.Push title="Open" target={<TimerForm onSchedule={scheduleFromForm} />} />
             </ActionPanel>
           }
         />
       </List.Section>
 
       <List.Section title="Active Timers">
-        {items.length === 0 && !isLoading ? (
-          <List.Item title="No active timers" subtitle="Start one from the section above" />
+        {!loading && timers.length === 0 ? (
+          <List.Item title="No active timers" subtitle="Start one above" />
         ) : (
-          items.map((item) => (
+          timers.map((item) => (
             <List.Item
               key={item.pid}
               title={`PID ${item.pid}`}
               subtitle={item.command}
               actions={
                 <ActionPanel>
-                  <Action title="Stop Timer" icon={Icon.Stop} onAction={() => stopProcess(item)} />
-                  <Action title="Refresh Active Timers" icon={Icon.ArrowClockwise} onAction={load} />
+                  <Action title="Stop" icon={Icon.Stop} onAction={() => stopTimer(item)} />
+                  <Action title="Refresh" icon={Icon.ArrowClockwise} onAction={reload} />
                 </ActionPanel>
               }
             />

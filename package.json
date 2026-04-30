@@ -15,6 +15,18 @@
       "title": "Stop Play After \"X\" Min",
       "description": "Start and manage stop-play timers in one command.",
       "mode": "view"
+    },
+    {
+      "name": "stop-play-after-20-min",
+      "title": "Stop Play After 20 Min",
+      "description": "Start a 20-minute stop-play timer instantly.",
+      "mode": "no-view"
+    },
+    {
+      "name": "reset-pmset-disablesleep",
+      "title": "Reset pmset disablesleep",
+      "description": "Run sudo pmset -a disablesleep 0.",
+      "mode": "no-view"
     }
   ],
   "dependencies": {
@@ -30,11 +42,11 @@
     "typescript": "^5.8.2"
   },
   "scripts": {
-    "build": "ray build",
-    "dev": "ray develop",
-    "fix-lint": "ray lint --fix",
-    "lint": "ray lint",
+    "build": "NODE_OPTIONS='--disable-warning=DEP0040' ray build",
+    "dev": "NODE_OPTIONS='--disable-warning=DEP0040' ray develop",
+    "fix-lint": "NODE_OPTIONS='--disable-warning=DEP0040' ray lint --fix",
+    "lint": "NODE_OPTIONS='--disable-warning=DEP0040' ray lint",
     "prepublishOnly": "echo \"\\n\\nIt seems like you are trying to publish the Raycast extension to npm.\\n\\nIf you did intend to publish it to npm, remove the \\`prepublishOnly\\` script and rerun \\`npm publish\\` again.\\nIf you wanted to publish it to the Raycast Store instead, use \\`npm run publish\\` instead.\\n\\n\" && exit 1",
-    "publish": "npx @raycast/api@latest publish"
+    "publish": "NODE_OPTIONS='--disable-warning=DEP0040' npx @raycast/api@latest publish"
   }
 }
