@@ -17,15 +17,15 @@
       "mode": "view"
     },
     {
+      "name": "stay-awake-then-sleep",
+      "title": "Stay Awake Then Sleep",
+      "description": "Keep the Mac from sleeping for a set time, then run system sleep.",
+      "mode": "view"
+    },
+    {
       "name": "stop-play-after-20-min",
       "title": "Stop Play After 20 Min",
       "description": "Start a 20-minute stop-play timer instantly.",
-      "mode": "no-view"
-    },
-    {
-      "name": "reset-pmset-disablesleep",
-      "title": "Reset pmset disablesleep",
-      "description": "Run sudo pmset -a disablesleep 0.",
       "mode": "no-view"
     }
   ],
