@@ -26,7 +26,13 @@ const MAX_RECENTS = 5;
 const MARKER = "STOP_PLAY_TIMER=1";
 
 function timerShell(seconds: number): string {
-  return `${MARKER};sudo pmset -a disablesleep 1; pmset displaysleepnow; sleep ${seconds}; shortcuts run "PausePlayer";sudo pmset -a disablesleep 0;`;
+  return `
+${MARKER};
+sudo pmset -a disablesleep 1;
+caffeinate -dimsu -t ${seconds};
+sudo pmset -a disablesleep 0;
+pmset sleepnow;
+`;
 }
 
 function startDetached(seconds: number): void {

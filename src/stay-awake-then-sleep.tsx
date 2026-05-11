@@ -26,7 +26,7 @@ const MAX_RECENTS = 5;
 const MARKER = "STAY_AWAKE_THEN_SLEEP=1";
 
 function awakeThenSleepShell(seconds: number): string {
-  return `${MARKER};sudo pmset -a disablesleep 1; sleep ${seconds};sudo pmset -a disablesleep 0;pmset sleepnow;`;
+  return `${MARKER};caffeinate -dimsu -t ${seconds};pmset sleepnow;`;
 }
 
 function startDetached(seconds: number): void {
@@ -37,7 +37,7 @@ async function successToast(seconds: number): Promise<void> {
   await showToast({
     style: Toast.Style.Success,
     title: `Stay awake for ${seconds} sec`,
-    message: "Then pmset sleepnow (system sleep)",
+    message: "caffeinate -t … then pmset sleepnow",
   });
 }
 
@@ -119,7 +119,7 @@ function TimerForm({ onSchedule }: { onSchedule: (seconds: number) => Promise<vo
         </ActionPanel>
       }
     >
-      <Form.Description text="Mac stays awake, then system sleep (pmset sleepnow)." />
+      <Form.Description text="caffeinate -t (your duration), then pmset sleepnow." />
       <Form.TextField id="hours" title="Hours" placeholder="0" defaultValue="0" />
       <Form.TextField id="minutes" title="Minutes" placeholder="20" defaultValue="0" />
       <Form.TextField id="seconds" title="Seconds" placeholder="0" defaultValue="0" />
