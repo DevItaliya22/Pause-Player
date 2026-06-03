@@ -180,6 +180,7 @@ export default function Command() {
   const stopTimer = async (item: RunningTimer) => {
     if (!(await confirmAlert({ title: `Stop timer PID ${item.pid}?`, message: item.command }))) return;
     await execFileAsync("kill", [item.pid]);
+    await execFileAsync("sudo", ["pmset", "-a", "disablesleep", "0"]);
     await showToast({ style: Toast.Style.Success, title: `Stopped timer ${item.pid}` });
     await reload();
   };
